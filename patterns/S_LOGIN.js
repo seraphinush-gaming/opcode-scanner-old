@@ -1,5 +1,6 @@
-module.exports = pak => {
-	let prev = pak.prev('C_SELECT_USER')
+module.exports = packet => { // 13
+  let prev = packet.prev('C_SELECT_USER');
 
-	return prev && pak.parse() && pak.parsed.playerId === prev.parsed.id
+  return prev &&
+    packet.parsed.playerId === prev.parsed.id;
 }

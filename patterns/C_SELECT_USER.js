@@ -1,1 +1,5 @@
-module.exports = pak => pak.order >= 4 && pak.parse() && pak.parsed.id !== 0 && pak.parsed.unk === 0
+module.exports = packet => { // 1
+    return packet.order >= 4 &&
+        packet.parsed.id !== 0 &&
+        packet.parsed.unk === 0;
+} 

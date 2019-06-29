@@ -1,1 +1,3 @@
-module.exports = pak => pak.code === 19901
+module.exports = packet => {
+  return packet.code === 19901;
+}

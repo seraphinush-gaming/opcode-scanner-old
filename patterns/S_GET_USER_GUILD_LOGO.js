@@ -1,5 +1,7 @@
-module.exports = pak => {
-	let prev = pak.prev('C_GET_USER_GUILD_LOGO')
+module.exports = packet => {
+  let next = packet.next();
 
-	return prev && pak.parse() && pak.parsed.playerId == prev.parsed.playerId && pak.parsed.guildId == prev.parsed.guildId
+  return next &&
+    next.name() === 'C_SELECT_USER' &&
+    next.packetOrder - packet.packetOrder === 1;
 }

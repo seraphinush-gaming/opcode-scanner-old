@@ -1,5 +1,7 @@
-module.exports = pak => {
-	let prev = pak.prev('S_LOGIN')
+module.exports = packet => { // 18
+  let prev = packet.prev('S_LOGIN');
 
-	return prev && pak.parse() && pak.parsed.id.equals(prev.parsed.cid)
+  return prev &&
+    packet.order - prev.order <= 2 &&
+    packet.parsed.gameId === prev.parsed.gameId;
 }

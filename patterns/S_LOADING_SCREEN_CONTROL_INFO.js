@@ -1,1 +1,4 @@
-module.exports = pak => pak.order === 1 && pak.parse() && pak.parsed.unk === 1
+module.exports = packet => {
+  return packet.order === 1 &&
+    (packet.parsed.enableCustom || !packet.parsed.enableCustom);
+}
