@@ -1,131 +1,224 @@
-const fs = require('fs'),
-	path = require('path'),
-	{protocol} = require('tera-data-parser')
+// Original code by Pinkie Pie (pinkipi, teramods)
+// Updated and reuploaded by seraphinush (seraphinush-gaming)
 
-class PacketInfo {
-	constructor(info) {
-		Object.assign(this, info)
-	}
+const fs = require('fs');
+const path = require('path');
+const Packet = require('./packet.js');
 
-	parse() {
-		this.triedParse = true
-		this.parsed = null
-		this.parsedLength = 0
+const PASSIVE_SCAN_INTERVAL = 5000;
+const PASSIVE_SCAN_TIMEOUT = 100;
+const PASSIVE_SCAN_HOLDOFF = 100;
 
-		let name = this.parseName || this.name(),
-			msg = protocol.messages.get(name)
+class Scanner {
 
-		if(msg)
-			try {
-				msg = msg.get(Math.max(...msg.keys()))
+  constructor(mod) {
 
-				this.parsed = protocol.parse(this.version, msg, this.data, name)
-				this.parsedLength = protocol.write(this.version, msg, '*', this.parsed, null, name, this.code).length
-			}
-			catch(e) {}
+    this.mod = mod;
 
-		if(this.parsed) return true
+    // TODO
+    if (this.mod.manager.isLoaded('command')) {
 
-		this.parsed = null
-		this.parsedLength = 0
-		return false
-	}
+      this.cmd = mod.command;
 
-	first(name) {
-		for(let packet of this.history)
-			if(packet.name() === name)
-				return packet
-	}
+      this.cmd.add('scan', {
+        '$default': () => {
+          console.log('test');
+        }
+      });
+    }
 
-	prev(name) {
-		if(!name) return this.history[this.index - 1]
+    this.history = [];
+    this.index = 0;
+    this.loggedMatch = {};
+    this.map = {};
+    this.mapped = {};
+    this.patterns = {};
+    this.version = 0;
 
-		for(let i = this.index - 1; i >= 0; i--) {
-			let packet = this.history[i]
+    this.packetOrder = 0;
+    this.clientOrder = 0;
+    this.serverOrder = 0;
 
-			if(packet.name() === name)
-				return packet
-		}
-	}
+    if (!this.version) {
+      this.version = this.mod.protocolVersion;
 
-	name() {
-		return this.map[this.code]
-	}
+      try {
+        let lines = fs.readFileSync(path.join(__dirname, 'maps', 'protocol.' + this.version + '.map'), 'utf8').split('\n');
+
+        for (let line of lines) {
+          line = line.split(' = ');
+          this.map[Number(line[1])] = line[0];
+          this.mapped[line[0]] = true;
+        }
+      } catch (e) { // improper protocol file
+        console.log(e.message);
+      }
+
+      let patterns = fs.readdirSync(path.join(__dirname, 'patterns')).filter(name => name.endsWith('js'));
+
+      for (let pattern of patterns) {
+        pattern = pattern.slice(0, pattern.indexOf('.')) || pattern;
+
+        if (!this.mapped[pattern]) {
+          this.patterns[pattern] = require('./patterns/' + pattern);
+          console.log('Missing opcode : ' + pattern);
+        }
+      }
+
+      console.log('Opcode scanner initialized, loaded ' + Object.keys(this.patterns).length + '/' + patterns.length + ' patterns.');
+    }
+
+    this.passiveScan();
+
+    this.mod.hook('*', 'raw', { order: -99999999 }, (code, data, fromServer) => {
+
+      let packet = new Packet({
+        code,
+        data: Buffer.from(data),
+        fromServer,
+        version: this.version,
+        map: this.map,
+        mapped: this.mapped,
+        history: this.history,
+        index: this.index++,
+        packetOrder: this.packetOrder++,
+        order: fromServer ? this.serverOrder++ : this.clientOrder++,
+        triedParse: false,
+        parsed: null,
+        parsedLength: 0,
+        parsedName: null,
+        time: Date.now()
+      });
+
+      if (this.map[code]) {
+        this.parse(packet);
+      } else {
+        this.scan(packet);
+      }
+
+      this.history.push(packet);
+    });
+  }
+
+  // TODO
+  parse(packet) {
+    return new Promise((resolve, reject) => {
+      packet.triedParse = true;
+
+      try {
+        let name = this.mod.dispatch.protocolMap.code.get(code) || packet.name();
+
+        packet.parsed = this.mod.dispatch.fromRaw(name, '*', packet.data);
+        packet.parsedLength = this.mod.dispatch.toRaw(name, '*', packet.data);
+      } catch {
+        //
+      }
+
+      if (packet.parsed && (packet.parsedLength === packet.data.length)) {
+        resolve();
+      }
+
+      packet.parsed = null;
+      packet.parsedLength = 0;
+      resolve();
+    });
+  }
+
+  async scan(packet) {
+    let prefix = packet.fromServer ? 'S_' : 'C_';
+
+    for (let pattern in this.patterns) {
+      if (pattern.startsWith(prefix)) {
+        packet.parseName = pattern;
+
+        try {
+          packet.setHistory(this.history);
+          await this.parse(packet);
+
+          if (this.patterns[pattern](packet)) {
+            if (packet.parsedLength === packet.data.length) {
+              console.log('Opcode found: ' + pattern + ' = ' + packet.code);
+              this.map[packet.code] = pattern;
+              this.mapped[pattern] = true;
+
+              // TODO
+              for (let item in this.history) {
+                if (item.code === packet.code && item.index !== packet.index) {
+                  this.parse(item);
+                }
+              }
+
+              this.writeMap();
+              delete this.patterns[pattern];
+              delete this.loggedMatch[pattern];
+              break;
+            } else if (!(this.loggedMatch[pattern] || (this.loggedMatch[pattern] = []))[packet.code]) {
+              this.loggedMatch[pattern][packet.code] = true;
+              console.log('Possible match: ' + pattern + ' = ' + packet.code + ' # length ' + packet.parsedLength + ' (expected ' + packet.data.length + ')');
+            }
+          } else {
+            delete packet.parsed;
+
+            delete packet.parseName;
+            delete packet.triedParse;
+          }
+        } catch (e) {
+          console.log('Misinformed heuristic for : ' + pattern);
+          console.log(e);
+          delete this.patterns[pattern];
+          delete this.loggedMatch[pattern];
+        }
+      }
+    }
+  }
+
+  writeMap() {
+    let mapDir = path.join(__dirname, 'maps'),
+      res = [];
+
+    for (let code in this.map) {
+      res.push(this.map[code] + ' = ' + code);
+      res.sort();
+    }
+
+    if (!fs.existsSync(mapDir)) {
+      fs.mkdirSync(mapDir);
+    }
+
+    fs.writeFileSync(path.join(mapDir, 'protocol.' + this.version + '.map'), res.join('\n'));
+  }
+
+  // async
+  async passiveScan() {
+    let connected = true;
+
+    while (connected) {
+      await this.sleep(PASSIVE_SCAN_INTERVAL);
+
+      // Set connected state before scanning so that the final pass will definitely happen after disconnect
+      connected = this.mod.connection.state !== 3;
+
+      let sleepTime = Date.now();
+
+      for (let i = this.history.length - 30; i >= 0 && i < this.history.length; i++) {
+        let packet = this.history[i];
+
+        if (!packet.parsed) {
+          if (Date.now() - sleepTime > PASSIVE_SCAN_TIMEOUT && connected) {
+            await this.sleep(PASSIVE_SCAN_HOLDOFF);
+            sleepTime = Date.now();
+          }
+
+          this.scan(packet);
+        }
+      }
+    }
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
 }
 
-module.exports = function OpcodeScanner(dispatch) {
-	let patterns = {}
-
-	{
-		let files = fs.readdirSync(path.join(__dirname, 'patterns')).filter(name => name.endsWith('.js'))
-
-		for(let name of files) patterns[name.slice(0, name.indexOf('.'))] = require('./patterns/' + name)
-	}
-
-	console.log('Opcode scanner initialized, loaded ' + Object.keys(patterns).length + ' pattern(s).')
-
-	let version = 0,
-		map = {},
-		history = [],
-		index = 0,
-		clientOrder = 0,
-		serverOrder = 0
-
-	dispatch.hook('*', 'raw', {order: -999999999}, (code, data, fromServer) => {
-		version = dispatch.base.protocolVersion
-
-		let info = new PacketInfo({
-			code,
-			data,
-			fromServer,
-			version,
-			map,
-			history,
-			index,
-			order: fromServer ? serverOrder : clientOrder,
-			time: Date.now()
-		})
-
-		history.push(info)
-
-		if(map[code]) info.parse()
-		else scan(info)
-
-		index++
-		if(fromServer) serverOrder++
-		else clientOrder++
-	})
-
-	function scan(info) {
-		for(let name in patterns)
-			if(name.startsWith(info.fromServer ? 'S_' : 'C_')) {
-				info.parseName = name
-
-				if(patterns[name](info)) {
-					if(!info.triedParse) info.parse()
-
-					if(info.parsedLength === info.data.length) {
-						console.log('Opcode found: ' + name + ' = ' + info.code)
-						map[info.code] = name
-						writeMap()
-						delete patterns[name]
-						break
-					}
-					else console.log('Pattern matches but length is wrong: ' + name + ' = ' + info.code + ', ' + info.parsedLength + ' != ' + info.data.length)
-				}
-
-				delete info.parseName
-				delete info.triedParse
-			}
-	}
-
-	function writeMap() {
-		let out = []
-
-		for(let code in map) out.push([map[code], code])
-		out.sort((a, b) => a[0] - b[0])
-		for(let i in out) out[i] = out[i].join(' = ')
-
-		fs.writeFileSync(path.join(__dirname, 'protocol.' + version + '.map'), out.join('\n'))
-	}
-}
+module.exports = Scanner;
