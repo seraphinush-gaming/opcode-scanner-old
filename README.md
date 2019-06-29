@@ -14,7 +14,25 @@ Original work by pinkipi (tera-mods)
 - Requires modular heuristic files in `patterns` folder
 - Generates protocol.version.map file in `maps` folder
 
-# Example
+# Pattern
+`patterns` folder contains modular heuristic js files used to scan incoming and outgoing packets.
+
+Packets are of the following key-values :
+- `code` : opcode specified to packet
+- `data` : raw data
+- `fromServer` : boolean, `true` for incoming server packets
+- `version` : client protocol version
+- `map` : object array of currently mapped opcodes
+- `mapped` : object array of currently mapped patterns
+- `history` : indexed array of all previous Packets prior to current Packet
+- `index` : index of current packet
+- `order` : index of current packet relative to either client packets or server packets, depending on `fromServer`
+- `triedParse` : boolean, whether packet has been parsed
+- `parsed` : parsed data based on packet definition
+- `parsedLength` : parsed length
+- `time` : time of packet
+
+## Example
 C_CHAT :
 ```js
 module.exports = packet => {
