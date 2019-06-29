@@ -1,0 +1,1 @@
+module.exports = pak => pak.order === 1 && pak.parse() && pak.parsed.unk === 1

@@ -1,0 +1,1 @@
+module.exports = pak => pak.parse() && /^@\d+/.test(pak.parsed.message)

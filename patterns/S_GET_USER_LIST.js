@@ -1,0 +1,1 @@
+module.exports = pak => pak.order === 5

@@ -1,0 +1,1 @@
+module.exports = pak => pak.order === 4 && pak.parse() && pak.parsed.serverName.startsWith('PlanetDB_')
